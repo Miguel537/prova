@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # ─── Banco de Dados ───────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: ms_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: users_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./shared/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d users_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Auth Service (Porta 3001) ────────────────────────────────
+  auth-service:
+    build: ./auth-service
+    container_name: ms_auth
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/users_db
+      - JWT_SECRET=minha_chave_super_secreta_jwt_2024
+      - JWT_EXPIRES_IN=1h
+      - PORT=3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── User Service (Porta 3002) ────────────────────────────────
+  user-service:
+    build: ./user-service
+    container_name: ms_users
+    ports:
+      - "3002:3002"
+    environment:
+      - DATABASE_URL=postgresql://admin:admin123@postgres:5432/users_db
+      - JWT_SECRET=minha_chave_super_secreta_jwt_2024
+      - PORT=3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── API Gateway (Porta 3000) ─────────────────────────────────
+  api-gateway:
+    build: ./api-gateway
+    container_name: ms_gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - USER_SERVICE_URL=http://user-service:3002
+      - PORT=3000
+    depends_on:
+      - auth-service
+      - user-service
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
